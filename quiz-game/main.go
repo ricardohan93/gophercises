@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 // present quiz problems
@@ -14,6 +15,7 @@ import (
 func main() {
 	// flag package is a way to define CLI flags, here is a -csv flag, default value is problems.csv and default text is the 3th arg
 	csvFilename := flag.String("csv", "problems.csv", "a csv file i the format of 'question,answer'")
+	timeLimit := flag.Int("limit", 30, "the time limit for the quiz in seconds")
 	flag.Parse()
 
 	// flag return a pointer, so we pass the value of the pointer here.
@@ -33,20 +35,41 @@ func main() {
 
 	problems := parseLines(lines)
 
+	// define the timer, uses the timer package and when it expires it sends a message to a channel
+	timer := time.NewTimer(time.Duration(*timeLimit) * time.Second)
+
 	// start couting how many answers are correct
 	correct := 0
 	// print the problems to the user
 	for i, p := range problems {
 		fmt.Printf("Problem %d: %s = \n", i+1, p.question)
-		// read an answer
-		// define a variable to store the user answer
-		var answer string
-		// scan text from user input. Since the answer is a single number, this is fine. But if the answer is a multiple
-		// text, it will give error because Scanf delete all spaces
-		// we use the pointer of the answer because when the user types his answer, we want to modify the value of the variable
-		fmt.Scanf("%s\n", &answer)
-		if answer == p.answer {
-			correct++
+		// below we defined a go routine to track if a user inputed an answer
+		// we defined a goroutine because fmt.Scanf would block the code, so even if the timer expires, the user could
+		// put an answer. By using the goroutine, fmt.Scanf is non blocking
+		answerCh := make(chan string)
+		go func() {
+			// read an answer
+			// define a variable to store the user answer
+			var answer string
+			// scan text from user input. Since the answer is a single number, this is fine. But if the answer is a multiple
+			// text, it will give error because Scanf delete all spaces
+			// we use the pointer of the answer because when the user types his answer, we want to modify the value of the variable
+			fmt.Scanf("%s\n", &answer)
+			// and we send the user answer into the outside variable, so it's acessible outside the goroutine
+			answerCh <- answer
+		}()
+		// the select inside the for loop says: if we receive a message in the timer channel, stop the program and print the result. Or if we receive a message in the answerCh, it means the user answered the question before the timer expires.
+		select {
+		// a linha abaixo cria um channel e escuta esse channel, esperando uma mensagem chegar.
+		case <-timer.C:
+			fmt.Printf("\nYou scored %d out of %d.\n", correct, len(problems))
+			return
+		// if there is an user answer, check for correctness
+		case answer := <-answerCh:
+			if answer == p.answer {
+				correct++
+				timer = time.NewTimer(time.Duration(*timeLimit) * time.Second)
+			}
 		}
 	}
 
